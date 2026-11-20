@@ -2476,11 +2476,13 @@ function testSanitizedHtml( method ) {
 	test( "<img alt=\"<x\" title=\"\" src=\"/><img src=url404 onerror=xss(9)>\">" );
 	test( "<noscript/><img src=url404 onerror=xss(10)>" );
 
+	test( "<option><style></option></select><img src=url404 onerror=xss(11)></style>" );
+
 	// Support: iOS 8 - 12 only.
 	// Old iOS parses `<noembed>` tags differently, executing this code. This is no
 	// different to native behavior on that OS, though, so just accept it.
 	if ( !oldIos ) {
-		test( "<noembed><noembed/><img src=url404 onerror=xss(11)>" );
+		test( "<noembed><noembed/><img src=url404 onerror=xss(12)>" );
 	}
 
 	expect( inputs.length );
@@ -2501,4 +2503,115 @@ asyncTest( "Sanitized HTML doesn't get unsanitized - html()", function() {
 
 asyncTest( "Sanitized HTML doesn't get unsanitized - append()", function() {
 	testSanitizedHtml( "append" );
+});
+
+test( "<option>/<optgroup> HTML isn't parsed inside a <select> wrapper (gh-4647)", function() {
+
+	var elems,
+		probe = document.createElement("div");
+
+	// Support: IE <=9 only
+	// IE <=9 replaces <option> tags with their contents when inserted outside of
+	// the select element, so the select wrapper is still required there.
+	probe.innerHTML = "<option></option>";
+	if ( !probe.lastChild ) {
+		expect( 1 );
+		ok( true, "<option> needs a <select> wrapper in this browser" );
+		return;
+	}
+
+	expect( 10 );
+
+	// Inside a <select> wrapper the stray </select> would close the wrapper and
+	// change how the rest of the markup is parsed.
+	elems = jQuery("<option>a</option></select><b>b</b>");
+	equal( elems.length, 2, "jQuery(): option and its sibling are both created" );
+	equal( elems[ 0 ] && elems[ 0 ].nodeName.toLowerCase(), "option", "jQuery(): first node is the option" );
+	equal( elems[ 1 ] && elems[ 1 ].nodeName.toLowerCase(), "b", "jQuery(): second node is the sibling" );
+
+	elems = jQuery("<optgroup label='g'></optgroup></select><b>b</b>");
+	equal( elems.length, 2, "jQuery(): optgroup and its sibling are both created" );
+
+	equal( jQuery.parseHTML("<option>a</option></select><b>b</b>").length, 2,
+		"jQuery.parseHTML(): option and its sibling are both created" );
+
+	equal( jQuery("<div></div>").html("<option>a</option></select><b>b</b>").children().length, 2,
+		"html(): option and its sibling are both created" );
+	equal( jQuery("<div></div>").append("<optgroup label='g'></optgroup></select><b>b</b>").children().length, 2,
+		"append(): optgroup and its sibling are both created" );
+	equal( jQuery("<div></div>").prepend("<option>a</option></select><b>b</b>").children().length, 2,
+		"prepend(): option and its sibling are both created" );
+
+	// <option> markup still works where it is meant to go
+	equal( jQuery("<select></select>").append("<option>1</option><option>2</option>").children("option").length, 2,
+		"append(): <option> markup still lands in a <select>" );
+	equal( jQuery("<select></select>").html("<optgroup label='g'><option>1</option></optgroup>").find("option").length, 1,
+		"html(): <optgroup> markup still lands in a <select>" );
+});
+
+asyncTest( "Sanitized <option>/<optgroup> HTML doesn't get unsanitized (gh-4647)", function() {
+
+	var container, i, j, payload,
+		counter = 0,
+		executed = {},
+		payloads = [],
+		templates = [
+			"<option><style></option></select><img src=url404 onerror=xss(#)></style>",
+			"<optgroup><style></optgroup></select><img src=url404 onerror=xss(#)></style>",
+			"<option><xmp></option></select><img src=url404 onerror=xss(#)></xmp>"
+		],
+		methods = [
+			[ "html", function( html ) {
+				jQuery("<div></div>").appendTo( container ).html( html );
+			} ],
+			[ "append", function( html ) {
+				jQuery("<div></div>").appendTo( container ).append( html );
+			} ],
+			[ "prepend", function( html ) {
+				jQuery("<div></div>").appendTo( container ).prepend( html );
+			} ],
+			[ "before", function( html ) {
+				jQuery("<div></div>").appendTo( container ).before( html );
+			} ],
+			[ "after", function( html ) {
+				jQuery("<div></div>").appendTo( container ).after( html );
+			} ],
+			[ "replaceWith", function( html ) {
+				jQuery("<div></div>").appendTo( container ).replaceWith( html );
+			} ],
+			[ "jQuery", function( html ) {
+				jQuery( html );
+			} ],
+			[ "jQuery.parseHTML", function( html ) {
+
+				// Use the live document as context; the default inert document
+				// never loads images, so it can't expose the payload
+				jQuery.parseHTML( html, document );
+			} ]
+		];
+
+	expect( templates.length * methods.length );
+
+	Globals.register("xss");
+	window.xss = function( index ) {
+		executed[ index ] = true;
+	};
+
+	container = jQuery("<div></div>").appendTo("#qunit-fixture");
+
+	for ( i = 0; i < templates.length; i++ ) {
+		for ( j = 0; j < methods.length; j++ ) {
+			payload = templates[ i ].replace( "#", counter );
+			payloads.push( methods[ j ][ 0 ] + "( " + payload + " )" );
+			methods[ j ][ 1 ]( payload );
+			counter++;
+		}
+	}
+
+	setTimeout(function() {
+		for ( i = 0; i < payloads.length; i++ ) {
+			ok( !executed[ i ], "Payload #" + i + " isn't executed: " + payloads[ i ] );
+		}
+		start();
+	}, 1000 );
 });
