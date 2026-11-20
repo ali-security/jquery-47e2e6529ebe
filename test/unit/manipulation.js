@@ -1615,7 +1615,7 @@ function testHtml( valueObj ) {
 		div = jQuery("<div></div>"),
 		fixture = jQuery("#qunit-fixture");
 
-	div.html( valueObj("<div id='parent_1'><div id='child_1'/></div><div id='parent_2'/>") );
+	div.html( valueObj("<div id='parent_1'><div id='child_1'></div></div><div id='parent_2'></div>") );
 	equal( div.children().length, 2, "Found children" );
 	equal( div.children().children().length, 1, "Found grandchild" );
 
@@ -2370,7 +2370,7 @@ test( "jQuery._evalUrl (#12838)", function() {
 		equal( ( input.url || input ).slice( -1 ), expectedArgument, message );
 		expectedArgument++;
 	};
-	jQuery("#qunit-fixture").append("<script src='1'/><script src='2'/>");
+	jQuery("#qunit-fixture").append("<script src='1'></script><script src='2'></script>");
 	equal( expectedArgument, 3, "synchronous execution" );
 
 	message = "custom implementation";
@@ -2379,7 +2379,7 @@ test( "jQuery._evalUrl (#12838)", function() {
 	jQuery.ajax = function( options ) {
 		strictEqual( options, {}, "Unexpected call to jQuery.ajax" );
 	};
-	jQuery("#qunit-fixture").append("<script src='3'/><script src='4'/>");
+	jQuery("#qunit-fixture").append("<script src='3'></script><script src='4'></script>");
 
 	jQuery.ajax = ajax;
 	jQuery._evalUrl = evalUrl;
@@ -2422,7 +2422,7 @@ test( "insertAfter, insertBefore, etc do not work when destination is original e
 test( "Index for function argument should be received (#13094)", 2, function() {
 	var i = 0;
 
-	jQuery("<div/><div/>").before(function( index ) {
+	jQuery("<div></div><div></div>").before(function( index ) {
 		equal( index, i++, "Index should be correct" );
 	});
 
@@ -2435,4 +2435,70 @@ test( "Make sure jQuery.fn.remove can work on elements in documentFragment", 1, 
 	jQuery( div ).remove();
 
 	equal( fragment.childNodes.length, 0, "div element was removed from documentFragment" );
+});
+
+function testSanitizedHtml( method ) {
+
+	var container,
+		executed = {},
+		inputs = [],
+		oldIos = /iphone os (?:8|9|10|11|12)_/i.test( navigator.userAgent );
+
+	Globals.register("xss");
+	window.xss = function( index ) {
+		executed[ index ] = true;
+	};
+
+	container = jQuery("<div></div>");
+	container.appendTo("#qunit-fixture");
+
+	function test( htmlString ) {
+		var div = jQuery("<div></div>");
+
+		inputs.push( htmlString );
+
+		div.appendTo( container );
+		div[ method ]( htmlString );
+	}
+
+	// Note: below test cases need to invoke the xss function with consecutive
+	// decimal parameters for the assertion messages to be correct.
+	// Thanks to Masato Kinugawa from Cure53 for providing the following test cases.
+	test( "<img alt=\"<x\" title=\"/><img src=url404 onerror=xss(0)>\">" );
+	test( "<img alt=\"\n<x\" title=\"/>\n<img src=url404 onerror=xss(1)>\">" );
+	test( "<style><style/><img src=url404 onerror=xss(2)>" );
+	test( "<xmp><xmp/><img src=url404 onerror=xss(3)>" );
+	test( "<title><title /><img src=url404 onerror=xss(4)>" );
+	test( "<iframe><iframe/><img src=url404 onerror=xss(5)>" );
+	test( "<noframes><noframes/><img src=url404 onerror=xss(6)>" );
+	test( "<noscript><noscript/><img src=url404 onerror=xss(7)>" );
+	test( "<foo\" alt=\"\" title=\"/><img src=url404 onerror=xss(8)>\">" );
+	test( "<img alt=\"<x\" title=\"\" src=\"/><img src=url404 onerror=xss(9)>\">" );
+	test( "<noscript/><img src=url404 onerror=xss(10)>" );
+
+	// Support: iOS 8 - 12 only.
+	// Old iOS parses `<noembed>` tags differently, executing this code. This is no
+	// different to native behavior on that OS, though, so just accept it.
+	if ( !oldIos ) {
+		test( "<noembed><noembed/><img src=url404 onerror=xss(11)>" );
+	}
+
+	expect( inputs.length );
+
+	setTimeout(function() {
+		var i;
+
+		for ( i = 0; i < inputs.length; i++ ) {
+			ok( !executed[ i ], "Insecure code wasn't executed, input: " + inputs[ i ] );
+		}
+		start();
+	}, 1000 );
+}
+
+asyncTest( "Sanitized HTML doesn't get unsanitized - html()", function() {
+	testSanitizedHtml( "html" );
+});
+
+asyncTest( "Sanitized HTML doesn't get unsanitized - append()", function() {
+	testSanitizedHtml( "append" );
 });
